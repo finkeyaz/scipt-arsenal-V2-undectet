@@ -1,0 +1,1659 @@
+-- ============================================================
+--  FK-SNIPER UNDETECT - Script Complet - ESP V2 / Fly / Noclip / InfJump
+--  A placer dans StarterPlayer > StarterPlayerScripts
+-- ============================================================
+
+-- === SERVICES ===
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+local TweenService = game:GetService("TweenService")
+local Workspace = game:GetService("Workspace")
+local CoreGui = game:GetService("CoreGui")
+
+local LocalPlayer = Players.LocalPlayer
+local Camera = Workspace.CurrentCamera
+local Mouse = LocalPlayer:GetMouse()
+
+-- === CONFIG ===
+local Config = {
+    AimbotEnabled = false,
+    AimbotFOV = 120,
+    AimbotSmoothness = 0.15,
+    AimbotKey = Enum.KeyCode.E,
+    ESPEnabled = false,
+    ESPColor = Color3.fromRGB(255, 0, 0),
+    ESPThickness = 1.5,
+    ESPShowName = true,
+    ESPShowDistance = true,
+    ESPShowHealth = true,
+    ESPShowSkeleton = true,
+    ESPShowLine = true,
+    FOVEnabled = false,
+    FOVValue = 70,
+    MaxFOV = 150,
+    TeamCheck = true,
+    MenuOpen = false,
+    MenuToggleKey = Enum.KeyCode.RightControl,
+}
+
+-- === VARIABLES SUPPLEMENTAIRES ===
+local TP_RENDER = "StableThirdPerson"
+local SPIN_RENDER = "SpinToupie"
+local FLY_RENDER = "FKFlyLoop"
+
+local thirdPersonActive = false
+local cameraDistance = 12
+local MIN_DISTANCE = 5
+local MAX_DISTANCE = 40
+
+local spinning = false
+local yaw = 0
+local spinSpeed = 18
+local MIN_SPIN = 6
+local MAX_SPIN = 40
+
+-- === FLY / NOCLIP / INFJUMP ===
+local flying = false
+local flySpeed = 60
+local MIN_FLY = 10
+local MAX_FLY = 300
+local noclipActive = false
+local infJumpActive = false
+
+local savedSettings = nil
+local ON = Color3.fromRGB(36, 140, 84)
+local OFF = Color3.fromRGB(48, 48, 56)
+
+local tpButton, spinButton, distLabel, speedLabel
+
+-- === VARIABLES ESP ===
+local ESPObjects = {}
+local AimbotFOVVisible = true
+
+-- ============================================================
+--  DESACTIVATION DE L'ANTI-CHEAT ARSENAL (UNDETECT)
+-- ============================================================
+local function DisableArsenalAntiCheat()
+	local count = 0
+	for _, obj in ipairs(game:GetDescendants()) do
+		if obj:IsA("BaseScript") then
+			local n = obj.Name:lower()
+			if n:find("anticheat")
+				or n:find("anti_cheat")
+				or n:find("anti-cheat")
+				or n:find("anti cheat")
+				or n == "ac"
+				or n:find("sentry")
+			then
+				if obj:IsA("LocalScript") then
+					pcall(function() obj.Disabled = true end)
+					count = count + 1
+				end
+			end
+		end
+	end
+	return count
+end
+
+-- Kill des anti-cheat connus dans ReplicatedStorage / PlayerScripts
+local function KillKnownAntiCheat()
+	for _, container in ipairs({game:GetService("ReplicatedStorage"), LocalPlayer:FindFirstChild("PlayerScripts"), LocalPlayer:FindFirstChild("PlayerGui")}) do
+		if container then
+			for _, obj in ipairs(container:GetDescendants()) do
+				if obj:IsA("BaseScript") then
+					local n = obj.Name:lower()
+					if n:find("anticheat") or n:find("anti_cheat") or n:find("anti-cheat") then
+						if obj:IsA("LocalScript") then
+							pcall(function() obj.Disabled = true end)
+						end
+					end
+				end
+			end
+		end
+	end
+end
+
+task.spawn(function()
+	DisableArsenalAntiCheat()
+	task.wait(3)
+	KillKnownAntiCheat()
+	task.wait(5)
+	DisableArsenalAntiCheat()
+end)
+
+----------------------------------------------------
+-- CONFIGURATION DISCORD & KEY SYSTEM
+----------------------------------------------------
+local DISCORD_LINK = "https://discord.gg/fkd9bs3kX"
+local SAVE_FILE_NAME = "FK_Cheat_SavedKey.txt"
+local SECRET_SALT = "FK_MHT_SECRET_KEY_SYSTEM_2026_998811"
+
+local blockedKeys = {}
+
+----------------------------------------------------
+-- LOGIQUE CRYPTOGRAPHIQUE & SYSTEME DE KEY
+----------------------------------------------------
+local function hashString(str)
+	local hash = 5381
+	for i = 1, #str do
+		hash = (bit32 and bit32.bxor(hash * 33, string.byte(str, i))) or ((hash * 33) + string.byte(str, i))
+	end
+	return string.format("%X", math.abs(hash))
+end
+
+local function createKey(durationUnit, durationVal)
+	local randomPart = string.format("%04X%04X", math.random(0, 65535), math.random(0, 65535))
+	local expireTime
+	if durationUnit == "Lifetime" then
+		expireTime = "LIFETIME"
+	else
+		local seconds = 0
+		if durationUnit == "Jours" then
+			seconds = durationVal * 86400
+		elseif durationUnit == "Mois" then
+			seconds = durationVal * 30 * 86400
+		elseif durationUnit == "Années" then
+			seconds = durationVal * 365 * 86400
+		end
+		expireTime = tostring(os.time() + seconds)
+	end
+	local payload = "FK-" .. randomPart .. "-" .. expireTime
+	local sig = hashString(payload .. SECRET_SALT)
+	return payload .. "-" .. sig
+end
+
+local function verifyKey(keyStr)
+	if not keyStr or type(keyStr) ~= "string" then return false, "Clé invalide" end
+	keyStr = keyStr:gsub("%s+", "")
+
+	if blockedKeys[keyStr] then
+		return false, "Clé bloquée par l'Admin"
+	end
+
+	local parts = string.split(keyStr, "-")
+	if #parts ~= 4 or parts[1] ~= "FK" then return false, "Format de clé incorrect" end
+
+	local randomPart = parts[2]
+	local expireStr = parts[3]
+	local sig = parts[4]
+
+	local expectedPayload = "FK-" .. randomPart .. "-" .. expireStr
+	local expectedSig = hashString(expectedPayload .. SECRET_SALT)
+
+	if sig ~= expectedSig then
+		return false, "Clé invalide ou falsifiée"
+	end
+
+	if expireStr == "LIFETIME" then
+		return true, "Lifetime (Infinie)", math.huge
+	end
+
+	local expireTime = tonumber(expireStr)
+	if not expireTime then return false, "Clé corrompue" end
+
+	local now = os.time()
+	local remaining = expireTime - now
+	if remaining <= 0 then
+		return false, "Clé expirée", 0
+	end
+
+	local days = math.floor(remaining / 86400)
+	local hours = math.floor((remaining % 86400) / 3600)
+	local mins = math.floor((remaining % 3600) / 60)
+	local secs = remaining % 60
+
+	local timeFormatted = ""
+	if days > 0 then timeFormatted = timeFormatted .. days .. "j " end
+	if hours > 0 or days > 0 then timeFormatted = timeFormatted .. hours .. "h " end
+	if mins > 0 or hours > 0 or days > 0 then timeFormatted = timeFormatted .. mins .. "m " end
+	timeFormatted = timeFormatted .. secs .. "s"
+
+	return true, timeFormatted, remaining
+end
+
+local function copyToClipboard(text)
+	if setclipboard then
+		setclipboard(text)
+	elseif toclipboard then
+		toclipboard(text)
+	elseif syn and syn.write_clipboard then
+		syn.write_clipboard(text)
+	end
+end
+
+-- ============================================================
+--  CREATION DU GUI (PANEL)
+-- ============================================================
+
+local oldGui = CoreGui:FindFirstChild("FKSniperGui")
+if oldGui then oldGui:Destroy() end
+local oldGui2 = CoreGui:FindFirstChild("FK-SNIPER UNDETECT")
+if oldGui2 then oldGui2:Destroy() end
+
+local ScreenGui = Instance.new("ScreenGui")
+ScreenGui.Name = "FK-SNIPER UNDETECT"
+ScreenGui.ResetOnSpawn = false
+ScreenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+ScreenGui.Parent = CoreGui
+
+----------------------------------------------------
+-- FENETRE SYSTEME DE KEY (KEY FRAME)
+----------------------------------------------------
+local keyFrame = Instance.new("Frame")
+keyFrame.Size = UDim2.new(0, 360, 0, 260)
+keyFrame.Position = UDim2.new(0.5, -180, 0.5, -130)
+keyFrame.BackgroundColor3 = Color3.fromRGB(15, 5, 8)
+keyFrame.BorderSizePixel = 0
+keyFrame.Active = true
+keyFrame.Visible = false
+keyFrame.Parent = ScreenGui
+
+local keyCorner = Instance.new("UICorner")
+keyCorner.CornerRadius = UDim.new(0, 10)
+keyCorner.Parent = keyFrame
+
+local keyStroke = Instance.new("UIStroke")
+keyStroke.Color = Color3.fromRGB(255, 0, 60)
+keyStroke.Thickness = 2.5
+keyStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+keyStroke.Parent = keyFrame
+TweenService:Create(keyStroke, TweenInfo.new(1.5, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut, -1, true), {
+	Color = Color3.fromRGB(255, 80, 100),
+	Thickness = 3.5
+}):Play()
+
+local keyTitle = Instance.new("TextLabel")
+keyTitle.Size = UDim2.new(1, 0, 0, 40)
+keyTitle.BackgroundTransparency = 1
+keyTitle.Text = "FK-SNIPER UNDETECT by elias — Key System"
+keyTitle.TextColor3 = Color3.fromRGB(255, 50, 80)
+keyTitle.TextSize = 16
+keyTitle.Font = Enum.Font.SourceSansBold
+keyTitle.Parent = keyFrame
+
+local keyInputBox = Instance.new("TextBox")
+keyInputBox.Size = UDim2.new(0.85, 0, 0, 35)
+keyInputBox.Position = UDim2.new(0.075, 0, 0.22, 0)
+keyInputBox.BackgroundColor3 = Color3.fromRGB(25, 8, 12)
+keyInputBox.PlaceholderText = "Mettez votre key ici..."
+keyInputBox.PlaceholderColor3 = Color3.fromRGB(150, 80, 90)
+keyInputBox.Text = ""
+keyInputBox.TextColor3 = Color3.fromRGB(255, 255, 255)
+keyInputBox.Font = Enum.Font.SourceSansBold
+keyInputBox.TextSize = 13
+keyInputBox.Parent = keyFrame
+
+local keyInputCorner = Instance.new("UICorner")
+keyInputCorner.CornerRadius = UDim.new(0, 6)
+keyInputCorner.Parent = keyInputBox
+
+local keyInputStroke = Instance.new("UIStroke")
+keyInputStroke.Color = Color3.fromRGB(180, 0, 40)
+keyInputStroke.Thickness = 1
+keyInputStroke.Parent = keyInputBox
+
+local validateKeyBtn = Instance.new("TextButton")
+validateKeyBtn.Size = UDim2.new(0.85, 0, 0, 35)
+validateKeyBtn.Position = UDim2.new(0.075, 0, 0.42, 0)
+validateKeyBtn.BackgroundColor3 = Color3.fromRGB(120, 10, 30)
+validateKeyBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+validateKeyBtn.Text = "Valider la key"
+validateKeyBtn.Font = Enum.Font.SourceSansBold
+validateKeyBtn.TextSize = 14
+validateKeyBtn.Parent = keyFrame
+
+local validateCorner = Instance.new("UICorner")
+validateCorner.CornerRadius = UDim.new(0, 6)
+validateCorner.Parent = validateKeyBtn
+
+local validateStroke = Instance.new("UIStroke")
+validateStroke.Color = Color3.fromRGB(255, 0, 60)
+validateStroke.Thickness = 1
+validateStroke.Parent = validateKeyBtn
+
+local getDiscordBtn = Instance.new("TextButton")
+getDiscordBtn.Size = UDim2.new(0.85, 0, 0, 35)
+getDiscordBtn.Position = UDim2.new(0.075, 0, 0.60, 0)
+getDiscordBtn.BackgroundColor3 = Color3.fromRGB(35, 10, 20)
+getDiscordBtn.TextColor3 = Color3.fromRGB(255, 100, 120)
+getDiscordBtn.Text = "Avoir une key (Discord)"
+getDiscordBtn.Font = Enum.Font.SourceSansBold
+getDiscordBtn.TextSize = 14
+getDiscordBtn.Parent = keyFrame
+
+local getDiscordCorner = Instance.new("UICorner")
+getDiscordCorner.CornerRadius = UDim.new(0, 6)
+getDiscordCorner.Parent = getDiscordBtn
+
+local getDiscordStroke = Instance.new("UIStroke")
+getDiscordStroke.Color = Color3.fromRGB(200, 0, 50)
+getDiscordStroke.Thickness = 1
+getDiscordStroke.Parent = getDiscordBtn
+
+local keyStatusLabel = Instance.new("TextLabel")
+keyStatusLabel.Size = UDim2.new(1, 0, 0, 25)
+keyStatusLabel.Position = UDim2.new(0, 0, 0.82, 0)
+keyStatusLabel.BackgroundTransparency = 1
+keyStatusLabel.Text = ""
+keyStatusLabel.TextColor3 = Color3.fromRGB(255, 80, 80)
+keyStatusLabel.TextSize = 12
+keyStatusLabel.Font = Enum.Font.SourceSans
+keyStatusLabel.Parent = keyFrame
+
+----------------------------------------------------
+-- MENU ADMIN F3 — PANNEAU GENERATEUR DE CLES
+----------------------------------------------------
+local adminPinFrame = Instance.new("Frame")
+adminPinFrame.Size = UDim2.new(0, 280, 0, 160)
+adminPinFrame.Position = UDim2.new(0.5, -140, 0.5, -80)
+adminPinFrame.BackgroundColor3 = Color3.fromRGB(15, 5, 8)
+adminPinFrame.BorderSizePixel = 0
+adminPinFrame.Visible = false
+adminPinFrame.Parent = ScreenGui
+Instance.new("UICorner", adminPinFrame).CornerRadius = UDim.new(0, 10)
+
+local pinStroke = Instance.new("UIStroke")
+pinStroke.Color = Color3.fromRGB(255, 180, 0)
+pinStroke.Thickness = 2
+pinStroke.Parent = adminPinFrame
+
+local pinTitle = Instance.new("TextLabel")
+pinTitle.Size = UDim2.new(1, 0, 0, 35)
+pinTitle.BackgroundTransparency = 1
+pinTitle.Text = "Accès Admin (Code PIN)"
+pinTitle.TextColor3 = Color3.fromRGB(255, 180, 0)
+pinTitle.TextSize = 15
+pinTitle.Font = Enum.Font.SourceSansBold
+pinTitle.Parent = adminPinFrame
+
+local pinBox = Instance.new("TextBox")
+pinBox.Size = UDim2.new(0.8, 0, 0, 30)
+pinBox.Position = UDim2.new(0.1, 0, 0.32, 0)
+pinBox.BackgroundColor3 = Color3.fromRGB(25, 8, 12)
+pinBox.PlaceholderText = "Entrez le code..."
+pinBox.Text = ""
+pinBox.TextColor3 = Color3.fromRGB(255, 255, 255)
+pinBox.Font = Enum.Font.SourceSansBold
+pinBox.TextSize = 14
+pinBox.Parent = adminPinFrame
+
+local pinBoxStroke = Instance.new("UIStroke")
+pinBoxStroke.Color = Color3.fromRGB(255, 180, 0)
+pinBoxStroke.Thickness = 1
+pinBoxStroke.Parent = pinBox
+
+local validatePinBtn = Instance.new("TextButton")
+validatePinBtn.Size = UDim2.new(0.8, 0, 0, 30)
+validatePinBtn.Position = UDim2.new(0.1, 0, 0.65, 0)
+validatePinBtn.BackgroundColor3 = Color3.fromRGB(150, 100, 0)
+validatePinBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+validatePinBtn.Text = "Valider PIN"
+validatePinBtn.Font = Enum.Font.SourceSansBold
+validatePinBtn.TextSize = 13
+validatePinBtn.Parent = adminPinFrame
+
+local adminGenFrame = Instance.new("Frame")
+adminGenFrame.Size = UDim2.new(0, 650, 0, 480)
+adminGenFrame.Position = UDim2.new(0.5, -325, 0.5, -240)
+adminGenFrame.BackgroundColor3 = Color3.fromRGB(15, 5, 8)
+adminGenFrame.BorderSizePixel = 0
+adminGenFrame.Active = true
+adminGenFrame.Visible = false
+adminGenFrame.Parent = ScreenGui
+Instance.new("UICorner", adminGenFrame).CornerRadius = UDim.new(0, 10)
+
+local genStroke = Instance.new("UIStroke")
+genStroke.Color = Color3.fromRGB(255, 180, 0)
+genStroke.Thickness = 2
+genStroke.Parent = adminGenFrame
+
+local genTitle = Instance.new("TextLabel")
+genTitle.Size = UDim2.new(1, 0, 0, 35)
+genTitle.BackgroundTransparency = 1
+genTitle.Text = "Dashboard Administrateur — Gestion des Clés"
+genTitle.TextColor3 = Color3.fromRGB(255, 180, 0)
+genTitle.TextSize = 18
+genTitle.Font = Enum.Font.SourceSansBold
+genTitle.Parent = adminGenFrame
+
+local topGenSection = Instance.new("Frame")
+topGenSection.Size = UDim2.new(0.94, 0, 0, 100)
+topGenSection.Position = UDim2.new(0.03, 0, 0.08, 0)
+topGenSection.BackgroundColor3 = Color3.fromRGB(25, 8, 12)
+topGenSection.Parent = adminGenFrame
+Instance.new("UICorner", topGenSection).CornerRadius = UDim.new(0, 8)
+
+local topGenStroke = Instance.new("UIStroke")
+topGenStroke.Color = Color3.fromRGB(200, 150, 0)
+topGenStroke.Thickness = 1
+topGenStroke.Parent = topGenSection
+
+local qtyBox = Instance.new("TextBox")
+qtyBox.Size = UDim2.new(0.15, 0, 0, 30)
+qtyBox.Position = UDim2.new(0.02, 0, 0.15, 0)
+qtyBox.BackgroundColor3 = Color3.fromRGB(35, 12, 18)
+qtyBox.Text = "1"
+qtyBox.PlaceholderText = "Nb"
+qtyBox.TextColor3 = Color3.fromRGB(255, 255, 255)
+qtyBox.Font = Enum.Font.SourceSansBold
+qtyBox.TextSize = 14
+qtyBox.Parent = topGenSection
+Instance.new("UICorner", qtyBox).CornerRadius = UDim.new(0, 4)
+
+local valBox = Instance.new("TextBox")
+valBox.Size = UDim2.new(0.15, 0, 0, 30)
+valBox.Position = UDim2.new(0.19, 0, 0.15, 0)
+valBox.BackgroundColor3 = Color3.fromRGB(35, 12, 18)
+valBox.Text = "1"
+valBox.PlaceholderText = "Durée"
+valBox.TextColor3 = Color3.fromRGB(255, 255, 255)
+valBox.Font = Enum.Font.SourceSansBold
+valBox.TextSize = 14
+valBox.Parent = topGenSection
+Instance.new("UICorner", valBox).CornerRadius = UDim.new(0, 4)
+
+local selectedUnit = "Jours"
+local unitButtons = {}
+
+local function createAdminUnitBtn(xPos, name)
+	local btn = Instance.new("TextButton")
+	btn.Size = UDim2.new(0.14, 0, 0, 30)
+	btn.Position = UDim2.new(xPos, 0, 0.15, 0)
+	btn.BackgroundColor3 = (selectedUnit == name) and Color3.fromRGB(200, 120, 0) or Color3.fromRGB(45, 15, 20)
+	btn.TextColor3 = Color3.fromRGB(255, 255, 255)
+	btn.Text = name
+	btn.Font = Enum.Font.SourceSansBold
+	btn.TextSize = 12
+	btn.Parent = topGenSection
+	Instance.new("UICorner", btn).CornerRadius = UDim.new(0, 4)
+
+	unitButtons[name] = btn
+	btn.MouseButton1Click:Connect(function()
+		selectedUnit = name
+		for uName, uBtn in pairs(unitButtons) do
+			uBtn.BackgroundColor3 = (uName == selectedUnit) and Color3.fromRGB(200, 120, 0) or Color3.fromRGB(45, 15, 20)
+		end
+		if name == "Lifetime" then
+			valBox.Visible = false
+		else
+			valBox.Visible = true
+		end
+	end)
+end
+
+createAdminUnitBtn(0.36, "Jours")
+createAdminUnitBtn(0.52, "Mois")
+createAdminUnitBtn(0.68, "Années")
+createAdminUnitBtn(0.84, "Lifetime")
+
+local generateBtn = Instance.new("TextButton")
+generateBtn.Size = UDim2.new(0.96, 0, 0, 35)
+generateBtn.Position = UDim2.new(0.02, 0, 0.55, 0)
+generateBtn.BackgroundColor3 = Color3.fromRGB(180, 100, 0)
+generateBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+generateBtn.Text = "Générer les Clés"
+generateBtn.Font = Enum.Font.SourceSansBold
+generateBtn.TextSize = 15
+generateBtn.Parent = topGenSection
+Instance.new("UICorner", generateBtn).CornerRadius = UDim.new(0, 4)
+
+local keysListScroll = Instance.new("ScrollingFrame")
+keysListScroll.Size = UDim2.new(0.94, 0, 0, 310)
+keysListScroll.Position = UDim2.new(0.03, 0, 0.32, 0)
+keysListScroll.BackgroundColor3 = Color3.fromRGB(20, 6, 10)
+keysListScroll.ScrollBarImageColor3 = Color3.fromRGB(255, 180, 0)
+keysListScroll.ScrollBarThickness = 6
+keysListScroll.Parent = adminGenFrame
+Instance.new("UICorner", keysListScroll).CornerRadius = UDim.new(0, 8)
+
+local uiListLayout = Instance.new("UIListLayout")
+uiListLayout.Parent = keysListScroll
+uiListLayout.SortOrder = Enum.SortOrder.LayoutOrder
+uiListLayout.Padding = UDim.new(0, 5)
+
+local function addKeyToPanel(keyString, durationLabel)
+	local row = Instance.new("Frame")
+	row.Size = UDim2.new(1, -10, 0, 40)
+	row.BackgroundColor3 = Color3.fromRGB(30, 10, 15)
+	row.Parent = keysListScroll
+	Instance.new("UICorner", row).CornerRadius = UDim.new(0, 6)
+
+	local kLabel = Instance.new("TextBox")
+	kLabel.Size = UDim2.new(0.55, 0, 1, 0)
+	kLabel.Position = UDim2.new(0.02, 0, 0, 0)
+	kLabel.BackgroundTransparency = 1
+	kLabel.Text = keyString
+	kLabel.TextColor3 = Color3.fromRGB(0, 220, 255)
+	kLabel.Font = Enum.Font.Code
+	kLabel.TextSize = 12
+	kLabel.TextXAlignment = Enum.TextXAlignment.Left
+	kLabel.ClearTextOnFocus = false
+	kLabel.TextEditable = false
+	kLabel.Parent = row
+
+	local durLabel = Instance.new("TextLabel")
+	durLabel.Size = UDim2.new(0.1, 0, 1, 0)
+	durLabel.Position = UDim2.new(0.58, 0, 0, 0)
+	durLabel.BackgroundTransparency = 1
+	durLabel.Text = durationLabel
+	durLabel.TextColor3 = Color3.fromRGB(200, 200, 200)
+	durLabel.Font = Enum.Font.SourceSansBold
+	durLabel.TextSize = 12
+	durLabel.Parent = row
+
+	local copyBtn = Instance.new("TextButton")
+	copyBtn.Size = UDim2.new(0.1, 0, 0, 26)
+	copyBtn.Position = UDim2.new(0.69, 0, 0.15, 0)
+	copyBtn.BackgroundColor3 = Color3.fromRGB(40, 100, 200)
+	copyBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+	copyBtn.Text = "Copier"
+	copyBtn.Font = Enum.Font.SourceSansBold
+	copyBtn.TextSize = 11
+	copyBtn.Parent = row
+	Instance.new("UICorner", copyBtn).CornerRadius = UDim.new(0, 4)
+
+	local blockBtn = Instance.new("TextButton")
+	blockBtn.Size = UDim2.new(0.09, 0, 0, 26)
+	blockBtn.Position = UDim2.new(0.80, 0, 0.15, 0)
+	blockBtn.BackgroundColor3 = Color3.fromRGB(150, 150, 0)
+	blockBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+	blockBtn.Text = "Bloquer"
+	blockBtn.Font = Enum.Font.SourceSansBold
+	blockBtn.TextSize = 11
+	blockBtn.Parent = row
+	Instance.new("UICorner", blockBtn).CornerRadius = UDim.new(0, 4)
+
+	local delBtn = Instance.new("TextButton")
+	delBtn.Size = UDim2.new(0.09, 0, 0, 26)
+	delBtn.Position = UDim2.new(0.90, 0, 0.15, 0)
+	delBtn.BackgroundColor3 = Color3.fromRGB(200, 40, 40)
+	delBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+	delBtn.Text = "Suppr."
+	delBtn.Font = Enum.Font.SourceSansBold
+	delBtn.TextSize = 11
+	delBtn.Parent = row
+	Instance.new("UICorner", delBtn).CornerRadius = UDim.new(0, 4)
+
+	copyBtn.MouseButton1Click:Connect(function()
+		copyToClipboard(keyString)
+		copyBtn.Text = "Fait!"
+		task.delay(1, function() copyBtn.Text = "Copier" end)
+	end)
+
+	blockBtn.MouseButton1Click:Connect(function()
+		if blockedKeys[keyString] then
+			blockedKeys[keyString] = false
+			blockBtn.BackgroundColor3 = Color3.fromRGB(150, 150, 0)
+			blockBtn.Text = "Bloquer"
+			kLabel.TextColor3 = Color3.fromRGB(0, 220, 255)
+		else
+			blockedKeys[keyString] = true
+			blockBtn.BackgroundColor3 = Color3.fromRGB(100, 30, 30)
+			blockBtn.Text = "Débloq."
+			kLabel.TextColor3 = Color3.fromRGB(255, 50, 50)
+		end
+	end)
+
+	delBtn.MouseButton1Click:Connect(function()
+		blockedKeys[keyString] = true
+		row:Destroy()
+	end)
+
+	keysListScroll.CanvasSize = UDim2.new(0, 0, 0, uiListLayout.AbsoluteContentSize.Y + 10)
+end
+
+generateBtn.MouseButton1Click:Connect(function()
+	local qty = tonumber(qtyBox.Text) or 1
+	local val = tonumber(valBox.Text) or 1
+
+	for i = 1, qty do
+		local newKey = createKey(selectedUnit, val)
+		local durText = selectedUnit == "Lifetime" and "À vie" or (val .. " " .. selectedUnit)
+		addKeyToPanel(newKey, durText)
+	end
+end)
+
+validatePinBtn.MouseButton1Click:Connect(function()
+	if pinBox.Text == "1455" then
+		adminPinFrame.Visible = false
+		adminGenFrame.Visible = true
+		pinBox.Text = ""
+	else
+		pinTitle.Text = "PIN Incorrect !"
+		task.delay(1.5, function() pinTitle.Text = "Accès Admin (Code PIN)" end)
+	end
+end)
+
+-- --- Panel principal ---
+local MainFrame = Instance.new("Frame")
+MainFrame.Name = "MainFrame"
+MainFrame.Size = UDim2.new(0, 380, 0, 480)
+MainFrame.Position = UDim2.new(0.5, -190, 0.5, -240)
+MainFrame.BackgroundColor3 = Color3.fromRGB(20, 20, 25)
+MainFrame.BorderSizePixel = 0
+MainFrame.Active = true
+MainFrame.Visible = false
+MainFrame.Parent = ScreenGui
+
+local UICorner = Instance.new("UICorner")
+UICorner.CornerRadius = UDim.new(0, 10)
+UICorner.Parent = MainFrame
+
+local UIStroke = Instance.new("UIStroke")
+UIStroke.Color = Color3.fromRGB(255, 30, 30)
+UIStroke.Thickness = 2
+UIStroke.Parent = MainFrame
+
+local TitleBar = Instance.new("Frame")
+TitleBar.Name = "TitleBar"
+TitleBar.Size = UDim2.new(1, 0, 0, 45)
+TitleBar.BackgroundColor3 = Color3.fromRGB(255, 20, 20)
+TitleBar.BorderSizePixel = 0
+TitleBar.Parent = MainFrame
+
+local TitleCorner = Instance.new("UICorner")
+TitleCorner.CornerRadius = UDim.new(0, 10)
+TitleCorner.Parent = TitleBar
+
+local TitleFix = Instance.new("Frame")
+TitleFix.Size = UDim2.new(1, 0, 0, 10)
+TitleFix.Position = UDim2.new(0, 0, 1, -10)
+TitleFix.BackgroundColor3 = Color3.fromRGB(255, 20, 20)
+TitleFix.BorderSizePixel = 0
+TitleFix.Parent = TitleBar
+
+local TitleLabel = Instance.new("TextLabel")
+TitleLabel.Name = "TitleLabel"
+TitleLabel.Size = UDim2.new(1, -60, 1, 0)
+TitleLabel.Position = UDim2.new(0, 10, 0, 0)
+TitleLabel.BackgroundTransparency = 1
+TitleLabel.Text = "FK-SNIPER UNDETECT"
+TitleLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+TitleLabel.Font = Enum.Font.GothamBold
+TitleLabel.TextSize = 18
+TitleLabel.TextXAlignment = Enum.TextXAlignment.Left
+TitleLabel.Parent = TitleBar
+
+local SubTitleLabel = Instance.new("TextLabel")
+SubTitleLabel.Size = UDim2.new(0, 150, 1, 0)
+SubTitleLabel.Position = UDim2.new(1, -155, 0, 0)
+SubTitleLabel.BackgroundTransparency = 1
+SubTitleLabel.Text = "by elias"
+SubTitleLabel.TextColor3 = Color3.fromRGB(255, 200, 200)
+SubTitleLabel.Font = Enum.Font.Gotham
+SubTitleLabel.TextSize = 12
+SubTitleLabel.TextXAlignment = Enum.TextXAlignment.Right
+SubTitleLabel.Parent = TitleBar
+
+local ScrollingFrame = Instance.new("ScrollingFrame")
+ScrollingFrame.Name = "Content"
+ScrollingFrame.Size = UDim2.new(1, -20, 1, -55)
+ScrollingFrame.Position = UDim2.new(0, 10, 0, 50)
+ScrollingFrame.BackgroundTransparency = 1
+ScrollingFrame.BorderSizePixel = 0
+ScrollingFrame.ScrollBarThickness = 4
+ScrollingFrame.ScrollBarImageColor3 = Color3.fromRGB(255, 30, 30)
+ScrollingFrame.CanvasSize = UDim2.new(0, 0, 0, 0)
+ScrollingFrame.AutomaticCanvasSize = Enum.AutomaticSize.Y
+ScrollingFrame.Parent = MainFrame
+
+local UIListLayout = Instance.new("UIListLayout")
+UIListLayout.Padding = UDim.new(0, 10)
+UIListLayout.SortOrder = Enum.SortOrder.LayoutOrder
+UIListLayout.Parent = ScrollingFrame
+
+-- ============================================================
+--  DRAG MANUEL DU PANEL
+-- ============================================================
+local panelDragging = false
+local dragStart = nil
+local startPos = nil
+
+TitleBar.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 then
+        panelDragging = true
+        dragStart = input.Position
+        startPos = MainFrame.Position
+    end
+end)
+TitleBar.InputEnded:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 then
+        panelDragging = false
+    end
+end)
+UserInputService.InputChanged:Connect(function(input)
+    if panelDragging and input.UserInputType == Enum.UserInputType.MouseMovement then
+        local delta = input.Position - dragStart
+        MainFrame.Position = UDim2.new(
+            startPos.X.Scale, startPos.X.Offset + delta.X,
+            startPos.Y.Scale, startPos.Y.Offset + delta.Y
+        )
+    end
+end)
+
+-- ============================================================
+--  FONCTIONS UTILITAIRES UI
+-- ============================================================
+
+local orderCounter = 0
+local function nextOrder()
+    orderCounter = orderCounter + 1
+    return orderCounter
+end
+
+local function CreateSection(title)
+    local SectionLabel = Instance.new("TextLabel")
+    SectionLabel.Size = UDim2.new(1, 0, 0, 25)
+    SectionLabel.BackgroundTransparency = 1
+    SectionLabel.Text = title
+    SectionLabel.TextColor3 = Color3.fromRGB(255, 60, 60)
+    SectionLabel.Font = Enum.Font.GothamBold
+    SectionLabel.TextSize = 14
+    SectionLabel.TextXAlignment = Enum.TextXAlignment.Left
+    SectionLabel.LayoutOrder = nextOrder()
+    SectionLabel.Parent = ScrollingFrame
+    return SectionLabel
+end
+
+local function CreateToggle(text, default, callback)
+    local ToggleFrame = Instance.new("Frame")
+    ToggleFrame.Size = UDim2.new(1, 0, 0, 40)
+    ToggleFrame.BackgroundColor3 = Color3.fromRGB(30, 30, 38)
+    ToggleFrame.BorderSizePixel = 0
+    ToggleFrame.LayoutOrder = nextOrder()
+
+    local Corner = Instance.new("UICorner")
+    Corner.CornerRadius = UDim.new(0, 6)
+    Corner.Parent = ToggleFrame
+
+    local Label = Instance.new("TextLabel")
+    Label.Size = UDim2.new(1, -60, 1, 0)
+    Label.Position = UDim2.new(0, 10, 0, 0)
+    Label.BackgroundTransparency = 1
+    Label.Text = text
+    Label.TextColor3 = Color3.fromRGB(255, 255, 255)
+    Label.Font = Enum.Font.Gotham
+    Label.TextSize = 14
+    Label.TextXAlignment = Enum.TextXAlignment.Left
+    Label.Parent = ToggleFrame
+
+    local ToggleBtn = Instance.new("TextButton")
+    ToggleBtn.Size = UDim2.new(0, 45, 0, 22)
+    ToggleBtn.Position = UDim2.new(1, -55, 0.5, -11)
+    ToggleBtn.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
+    ToggleBtn.BorderSizePixel = 0
+    ToggleBtn.Text = ""
+    ToggleBtn.Parent = ToggleFrame
+
+    local ToggleCorner = Instance.new("UICorner")
+    ToggleCorner.CornerRadius = UDim.new(1, 0)
+    ToggleCorner.Parent = ToggleBtn
+
+    local ToggleCircle = Instance.new("Frame")
+    ToggleCircle.Size = UDim2.new(0, 18, 0, 18)
+    ToggleCircle.Position = UDim2.new(0, 2, 0.5, -9)
+    ToggleCircle.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+    ToggleCircle.BorderSizePixel = 0
+    ToggleCircle.Parent = ToggleBtn
+
+    local CircleCorner = Instance.new("UICorner")
+    CircleCorner.CornerRadius = UDim.new(1, 0)
+    CircleCorner.Parent = ToggleCircle
+
+    local state = default
+
+    local function UpdateToggle()
+        if state then
+            TweenService:Create(ToggleBtn, TweenInfo.new(0.15), {
+                BackgroundColor3 = Color3.fromRGB(255, 30, 30)
+            }):Play()
+            TweenService:Create(ToggleCircle, TweenInfo.new(0.15), {
+                Position = UDim2.new(1, -20, 0.5, -9)
+            }):Play()
+        else
+            TweenService:Create(ToggleBtn, TweenInfo.new(0.15), {
+                BackgroundColor3 = Color3.fromRGB(50, 50, 50)
+            }):Play()
+            TweenService:Create(ToggleCircle, TweenInfo.new(0.15), {
+                Position = UDim2.new(0, 2, 0.5, -9)
+            }):Play()
+        end
+    end
+
+    ToggleBtn.MouseButton1Click:Connect(function()
+        state = not state
+        UpdateToggle()
+        callback(state)
+    end)
+
+    UpdateToggle()
+    ToggleFrame.Parent = ScrollingFrame
+    return ToggleFrame
+end
+
+local function CreateSlider(text, minVal, maxVal, default, callback)
+    local SliderFrame = Instance.new("Frame")
+    SliderFrame.Size = UDim2.new(1, 0, 0, 50)
+    SliderFrame.BackgroundColor3 = Color3.fromRGB(30, 30, 38)
+    SliderFrame.BorderSizePixel = 0
+    SliderFrame.LayoutOrder = nextOrder()
+
+    local Corner = Instance.new("UICorner")
+    Corner.CornerRadius = UDim.new(0, 6)
+    Corner.Parent = SliderFrame
+
+    local Label = Instance.new("TextLabel")
+    Label.Size = UDim2.new(0.6, 0, 0, 20)
+    Label.Position = UDim2.new(0, 10, 0, 5)
+    Label.BackgroundTransparency = 1
+    Label.Text = text
+    Label.TextColor3 = Color3.fromRGB(255, 255, 255)
+    Label.Font = Enum.Font.Gotham
+    Label.TextSize = 13
+    Label.TextXAlignment = Enum.TextXAlignment.Left
+    Label.Parent = SliderFrame
+
+    local ValueLabel = Instance.new("TextLabel")
+    ValueLabel.Size = UDim2.new(0, 60, 0, 20)
+    ValueLabel.Position = UDim2.new(1, -65, 0, 5)
+    ValueLabel.BackgroundTransparency = 1
+    ValueLabel.Text = tostring(default)
+    ValueLabel.TextColor3 = Color3.fromRGB(255, 60, 60)
+    ValueLabel.Font = Enum.Font.GothamBold
+    ValueLabel.TextSize = 13
+    ValueLabel.TextXAlignment = Enum.TextXAlignment.Right
+    ValueLabel.Parent = SliderFrame
+
+    local SliderBar = Instance.new("TextButton")
+    SliderBar.Size = UDim2.new(1, -20, 0, 6)
+    SliderBar.Position = UDim2.new(0, 10, 0, 33)
+    SliderBar.BackgroundColor3 = Color3.fromRGB(50, 50, 55)
+    SliderBar.BorderSizePixel = 0
+    SliderBar.Text = ""
+    SliderBar.AutoButtonColor = false
+    SliderBar.Parent = SliderFrame
+
+    local BarCorner = Instance.new("UICorner")
+    BarCorner.CornerRadius = UDim.new(1, 0)
+    BarCorner.Parent = SliderBar
+
+    local Fill = Instance.new("Frame")
+    Fill.Size = UDim2.new((default - minVal) / (maxVal - minVal), 0, 1, 0)
+    Fill.BackgroundColor3 = Color3.fromRGB(255, 30, 30)
+    Fill.BorderSizePixel = 0
+    Fill.Parent = SliderBar
+
+    local FillCorner = Instance.new("UICorner")
+    FillCorner.CornerRadius = UDim.new(1, 0)
+    FillCorner.Parent = Fill
+
+    local sliderDragging = false
+
+    local function UpdateValue(inputX)
+        local rel = math.clamp((inputX - SliderBar.AbsolutePosition.X) / SliderBar.AbsoluteSize.X, 0, 1)
+        local value = math.floor(minVal + (maxVal - minVal) * rel + 0.5)
+        Fill.Size = UDim2.new(rel, 0, 1, 0)
+        ValueLabel.Text = tostring(value)
+        callback(value)
+    end
+
+    SliderBar.MouseButton1Down:Connect(function()
+        sliderDragging = true
+        UpdateValue(Mouse.X)
+    end)
+    UserInputService.InputChanged:Connect(function(input)
+        if sliderDragging and input.UserInputType == Enum.UserInputType.MouseMovement then
+            UpdateValue(input.Position.X)
+        end
+    end)
+    UserInputService.InputEnded:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 then
+            sliderDragging = false
+        end
+    end)
+
+    SliderFrame.Parent = ScrollingFrame
+    return SliderFrame
+end
+
+-- ============================================================
+--  LOGIQUE 3ème PERSONNE & SPIN BOT
+-- ============================================================
+
+local function setZoom(distance)
+	if distance < LocalPlayer.CameraMinZoomDistance then
+		LocalPlayer.CameraMinZoomDistance = distance
+		LocalPlayer.CameraMaxZoomDistance = distance
+	else
+		LocalPlayer.CameraMaxZoomDistance = distance
+		LocalPlayer.CameraMinZoomDistance = distance
+	end
+end
+
+local function setOcclusion(mode)
+	pcall(function()
+		LocalPlayer.DevCameraOcclusionMode = mode
+	end)
+end
+
+local function restoreSettings()
+	if not savedSettings then return end
+
+	LocalPlayer.CameraMode = savedSettings.cameraMode
+	LocalPlayer.CameraMinZoomDistance = 0.5
+	LocalPlayer.CameraMaxZoomDistance = savedSettings.maxZoom
+	LocalPlayer.CameraMinZoomDistance = math.clamp(savedSettings.minZoom, 0.5, savedSettings.maxZoom)
+	setOcclusion(savedSettings.occlusion)
+
+	Camera = Workspace.CurrentCamera
+	if Camera then
+		Camera.CameraType = savedSettings.cameraType
+	end
+
+	savedSettings = nil
+end
+
+local function onThirdPerson()
+	if not thirdPersonActive then return end
+
+	Camera = Workspace.CurrentCamera
+	if not Camera then return end
+
+	setOcclusion(Enum.DevCameraOcclusionMode.Invisicam)
+	LocalPlayer.CameraMode = Enum.CameraMode.Classic
+	Camera.CameraType = Enum.CameraType.Custom
+	setZoom(cameraDistance)
+end
+
+local function setThirdPerson(on)
+	if on == thirdPersonActive then return end
+
+	thirdPersonActive = on
+
+	if thirdPersonActive then
+		Camera = Workspace.CurrentCamera
+
+		local occlusion = Enum.DevCameraOcclusionMode.Zoom
+		pcall(function()
+			occlusion = LocalPlayer.DevCameraOcclusionMode
+		end)
+
+		savedSettings = {
+			minZoom = LocalPlayer.CameraMinZoomDistance,
+			maxZoom = LocalPlayer.CameraMaxZoomDistance,
+			cameraMode = LocalPlayer.CameraMode,
+			occlusion = occlusion,
+			cameraType = Camera and Camera.CameraType or Enum.CameraType.Custom,
+		}
+
+		pcall(function() RunService:UnbindFromRenderStep(TP_RENDER) end)
+		RunService:BindToRenderStep(TP_RENDER, Enum.RenderPriority.Camera.Value - 1, onThirdPerson)
+		onThirdPerson()
+	else
+		pcall(function() RunService:UnbindFromRenderStep(TP_RENDER) end)
+		restoreSettings()
+	end
+end
+
+local function getParts()
+	local character = LocalPlayer.Character
+	if not character then return nil end
+	local humanoid = character:FindFirstChildOfClass("Humanoid")
+	local root = character:FindFirstChild("HumanoidRootPart")
+	if not humanoid or not root or humanoid.Health <= 0 then return nil end
+	return humanoid, root
+end
+
+local function onSpin(dt)
+	if not spinning then return end
+
+	local humanoid, root = getParts()
+	if not humanoid then return end
+
+	humanoid.AutoRotate = false
+	yaw += spinSpeed * dt
+	root.CFrame = CFrame.new(root.Position) * CFrame.Angles(0, yaw, 0)
+end
+
+local function setSpin(on)
+	if on == spinning then return end
+
+	spinning = on
+	local humanoid, root = getParts()
+
+	if spinning and root then
+		local _, currentYaw = root.CFrame:ToOrientation()
+		yaw = currentYaw
+	end
+
+	if humanoid then
+		humanoid.AutoRotate = not spinning
+	end
+end
+
+pcall(function() RunService:UnbindFromRenderStep(SPIN_RENDER) end)
+RunService:BindToRenderStep(SPIN_RENDER, Enum.RenderPriority.Character.Value + 1, onSpin)
+
+-- ============================================================
+--  LOGIQUE FLY / NOCLIP / INFINITE JUMP
+-- ============================================================
+
+-- FLY : déplacement libre dans la direction de la caméra
+local function onFly(dt)
+	if not flying then return end
+
+	local character = LocalPlayer.Character
+	if not character then return end
+	local hrp = character:FindFirstChild("HumanoidRootPart")
+	if not hrp then return end
+
+	local moveDir = Vector3.new(0, 0, 0)
+
+	if UserInputService:IsKeyDown(Enum.KeyCode.W) then moveDir += Camera.CFrame.LookVector end
+	if UserInputService:IsKeyDown(Enum.KeyCode.S) then moveDir -= Camera.CFrame.LookVector end
+	if UserInputService:IsKeyDown(Enum.KeyCode.A) then moveDir -= Camera.CFrame.RightVector end
+	if UserInputService:IsKeyDown(Enum.KeyCode.D) then moveDir += Camera.CFrame.RightVector end
+	if UserInputService:IsKeyDown(Enum.KeyCode.Space) then moveDir += Vector3.new(0, 1, 0) end
+	if UserInputService:IsKeyDown(Enum.KeyCode.LeftShift) then moveDir -= Vector3.new(0, 1, 0) end
+
+	if moveDir.Magnitude > 0 then
+		moveDir = moveDir.Unit
+	end
+
+	hrp.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
+	hrp.CFrame = hrp.CFrame + moveDir * flySpeed * dt
+end
+
+local function setFly(on)
+	flying = on
+	if flying then
+		pcall(function() RunService:UnbindFromRenderStep(FLY_RENDER) end)
+		RunService:BindToRenderStep(FLY_RENDER, Enum.RenderPriority.Character.Value + 2, onFly)
+	else
+		pcall(function() RunService:UnbindFromRenderStep(FLY_RENDER) end)
+	end
+end
+
+-- NOCLIP : désactive la collision de tous les membres
+RunService.Stepped:Connect(function()
+	if noclipActive then
+		local character = LocalPlayer.Character
+		if character then
+			for _, part in ipairs(character:GetDescendants()) do
+				if part:IsA("BasePart") then
+					part.CanCollide = false
+				end
+			end
+		end
+	end
+end)
+
+-- INFINITE JUMP : saut infini en MAINTENANT espace (Arsenal)
+local function infJumpLoop()
+	if not infJumpActive then return end
+	if not UserInputService:IsKeyDown(Enum.KeyCode.Space) then return end
+
+	local character = LocalPlayer.Character
+	if not character then return end
+	local humanoid = character:FindFirstChildOfClass("Humanoid")
+	if not humanoid or humanoid.Health <= 0 then return end
+
+	local state = humanoid:GetState()
+	if state == Enum.HumanoidStateType.Freefall
+		or state == Enum.HumanoidStateType.Landed
+		or state == Enum.HumanoidStateType.Running
+		or state == Enum.HumanoidStateType.RunningNoPhysics then
+		humanoid:ChangeState(Enum.HumanoidStateType.Jumping)
+	end
+end
+
+pcall(function() RunService:UnbindFromRenderStep("FKInfJump") end)
+RunService:BindToRenderStep("FKInfJump", Enum.RenderPriority.Character.Value + 3, infJumpLoop)
+
+-- ============================================================
+--  CERCLE FOV AIMBOT
+-- ============================================================
+
+local FOVCircle = Drawing.new("Circle")
+FOVCircle.Visible = true
+FOVCircle.Radius = Config.AimbotFOV
+FOVCircle.Color = Color3.fromRGB(255, 30, 30)
+FOVCircle.Thickness = 1.5
+FOVCircle.Filled = false
+FOVCircle.NumSides = 60
+
+local function UpdateFOVCircle()
+    FOVCircle.Position = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)
+    FOVCircle.Radius = Config.AimbotFOV
+    FOVCircle.Visible = Config.AimbotEnabled and AimbotFOVVisible
+end
+
+-- ============================================================
+--  AIMBOT
+-- ============================================================
+
+local function GetClosestPlayer()
+    local closestPlayer = nil
+    local closestDistance = Config.AimbotFOV
+    local center = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)
+
+    for _, player in ipairs(Players:GetPlayers()) do
+        if player ~= LocalPlayer then
+            local character = player.Character
+            if character and character:FindFirstChild("HumanoidRootPart") and character:FindFirstChild("Humanoid") then
+                if character.Humanoid.Health > 0 then
+                    if Config.TeamCheck and player.Team == LocalPlayer.Team and player.Team ~= nil then
+                        continue
+                    end
+                    local screenPos, onScreen = Camera:WorldToViewportPoint(character.HumanoidRootPart.Position)
+                    if onScreen then
+                        local distance = (Vector2.new(screenPos.X, screenPos.Y) - center).Magnitude
+                        if distance < closestDistance then
+                            closestDistance = distance
+                            closestPlayer = player
+                        end
+                    end
+                end
+            end
+        end
+    end
+
+    return closestPlayer
+end
+
+local function AimbotLoop()
+    if not Config.AimbotEnabled then return end
+
+    local aimKeyDown = UserInputService:IsMouseButtonPressed(Enum.UserInputType.MouseButton2)
+    if aimKeyDown or UserInputService:IsKeyDown(Config.AimbotKey) then
+        local target = GetClosestPlayer()
+        if target and target.Character and target.Character:FindFirstChild("HumanoidRootPart") then
+            local targetPos = target.Character.HumanoidRootPart.Position
+            local newCFrame = CFrame.new(Camera.CFrame.Position, targetPos)
+            Camera.CFrame = Camera.CFrame:Lerp(newCFrame, Config.AimbotSmoothness)
+        end
+    end
+end
+
+-- ============================================================
+--  SKELETON ESP - DEFINITION DES OS
+-- ============================================================
+
+local BONE_CONNECTIONS = {
+    {"Head", "UpperTorso"},
+    {"UpperTorso", "LowerTorso"},
+    {"UpperTorso", "LeftUpperArm"},
+    {"LeftUpperArm", "LeftLowerArm"},
+    {"LeftLowerArm", "LeftHand"},
+    {"UpperTorso", "RightUpperArm"},
+    {"RightUpperArm", "RightLowerArm"},
+    {"RightLowerArm", "RightHand"},
+    {"LowerTorso", "LeftUpperLeg"},
+    {"LeftUpperLeg", "LeftLowerLeg"},
+    {"LeftLowerLeg", "LeftFoot"},
+    {"LowerTorso", "RightUpperLeg"},
+    {"RightUpperLeg", "RightLowerLeg"},
+    {"RightLowerLeg", "RightFoot"},
+    {"Head", "Torso"},
+    {"Torso", "Left Arm"},
+    {"Torso", "Right Arm"},
+    {"Torso", "Left Leg"},
+    {"Torso", "Right Leg"},
+}
+
+-- ============================================================
+--  ESP V2 (Drawing API)
+-- ============================================================
+
+local function setProp(obj, prop, value)
+    if obj and obj[prop] ~= value then
+        obj[prop] = value
+    end
+end
+
+local function setLine(line, from, to, color, thickness)
+    if not line then return end
+    setProp(line, "From", from)
+    setProp(line, "To", to)
+    setProp(line, "Color", color)
+    setProp(line, "Thickness", thickness)
+end
+
+local function HideAllObjects(objs)
+    if objs.healthBar then
+        setProp(objs.healthBar, "Visible", false)
+    end
+    if objs.tracer then
+        setProp(objs.tracer, "Visible", false)
+    end
+    if objs.skeleton then
+        for _, line in ipairs(objs.skeleton) do
+            setProp(line, "Visible", false)
+        end
+    end
+end
+
+local function ClearESPForPlayer(player)
+    if ESPObjects[player] then
+        if ESPObjects[player].healthBar and ESPObjects[player].healthBar.Remove then
+            ESPObjects[player].healthBar:Remove()
+        end
+        if ESPObjects[player].tracer and ESPObjects[player].tracer.Remove then
+            ESPObjects[player].tracer:Remove()
+        end
+        if ESPObjects[player].skeleton then
+            for _, line in ipairs(ESPObjects[player].skeleton) do
+                line:Remove()
+            end
+        end
+        ESPObjects[player] = nil
+    end
+end
+
+local deadCharacters = {}
+local watchCharacterDeath
+
+local function CreateESPForPlayer(player)
+    ESPObjects[player] = {}
+
+    local healthBar = Drawing.new("Line")
+    healthBar.Thickness = 3
+    healthBar.Color = Color3.fromRGB(0, 255, 0)
+    healthBar.Visible = false
+    ESPObjects[player].healthBar = healthBar
+
+    -- ESP Line V2 (tracer du bas de l'écran vers l'ennemi)
+    local tracer = Drawing.new("Line")
+    tracer.Thickness = 1
+    tracer.Color = Config.ESPColor
+    tracer.Visible = false
+    ESPObjects[player].tracer = tracer
+
+    local skeleton = {}
+    for i = 1, #BONE_CONNECTIONS do
+        local line = Drawing.new("Line")
+        line.Thickness = Config.ESPThickness
+        line.Color = Config.ESPColor
+        line.Visible = false
+        table.insert(skeleton, line)
+    end
+    ESPObjects[player].skeleton = skeleton
+
+    if player.Character then
+        watchCharacterDeath(player, player.Character)
+    end
+    player.CharacterAdded:Connect(function(newChar)
+        for oldChar, _ in pairs(deadCharacters) do
+            if not oldChar or not oldChar:IsDescendantOf(Workspace) then
+                deadCharacters[oldChar] = nil
+            end
+        end
+        local newHum = newChar:WaitForChild("Humanoid", 5)
+        if newHum then
+            deadCharacters[newChar] = nil
+            watchCharacterDeath(player, newChar)
+        end
+    end)
+    player.CharacterRemoving:Connect(function()
+        HideAllObjects(ESPObjects[player])
+    end)
+end
+
+local function IsCharacterValid(player)
+    if not player or not player.Character then return false end
+    local char = player.Character
+    if deadCharacters[char] then return false end
+    if not char:IsDescendantOf(Workspace) then return false end
+    local hrp = char:FindFirstChild("HumanoidRootPart")
+    local hum = char:FindFirstChildOfClass("Humanoid")
+    if not hrp or not hum then return false end
+    if hum.Health <= 0 then return false end
+    if hum:GetState() == Enum.HumanoidStateType.Dead then return false end
+    return true
+end
+
+watchCharacterDeath = function(player, char)
+    local hum = char:FindFirstChildOfClass("Humanoid") or char:WaitForChild("Humanoid", 5)
+    if hum then
+        hum.Died:Connect(function()
+            deadCharacters[char] = true
+            if ESPObjects[player] then
+                HideAllObjects(ESPObjects[player])
+            end
+        end)
+    end
+end
+
+local function UpdateESP()
+    if not Config.ESPEnabled then
+        for player, objs in pairs(ESPObjects) do
+            HideAllObjects(objs)
+        end
+        return
+    end
+
+    for player, objs in pairs(ESPObjects) do
+        if not IsCharacterValid(player) then
+            HideAllObjects(objs)
+            continue
+        end
+
+        local char = player.Character
+        local hrp = char:FindFirstChild("HumanoidRootPart")
+        local humanoid = char:FindFirstChild("Humanoid")
+        local screenPos, onScreen = Camera:WorldToViewportPoint(hrp.Position)
+
+        if Config.TeamCheck and player.Team == LocalPlayer.Team and player.Team ~= nil then
+            HideAllObjects(objs)
+            continue
+        end
+
+        if onScreen then
+            local headPos = char:FindFirstChild("Head")
+            local headY = headPos and Camera:WorldToViewportPoint(headPos.Position).Y or screenPos.Y - 50
+            local legY = Camera:WorldToViewportPoint(hrp.Position - Vector3.new(0, 3, 0)).Y
+
+            local boxHeight = math.abs(headY - legY)
+            local boxX = screenPos.X
+            local boxY = headY
+
+            if Config.ESPShowHealth and humanoid then
+                local healthPct = math.clamp(humanoid.Health / humanoid.MaxHealth, 0, 1)
+                setLine(objs.healthBar, Vector2.new(boxX - 15, boxY + boxHeight), Vector2.new(boxX - 15, boxY + boxHeight - boxHeight * healthPct), Color3.fromRGB(255 - 255 * healthPct, 255 * healthPct, 0), 3)
+                setProp(objs.healthBar, "Visible", true)
+            else
+                setProp(objs.healthBar, "Visible", false)
+            end
+
+            -- ESP Line V2 : tracer du bas de l'écran vers la tête/le corps
+            if Config.ESPShowLine and objs.tracer then
+                local fromPoint = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y)
+                local toPoint = Vector2.new(screenPos.X, screenPos.Y)
+                setLine(objs.tracer, fromPoint, toPoint, Config.ESPColor, 1)
+                setProp(objs.tracer, "Visible", true)
+            else
+                if objs.tracer then
+                    setProp(objs.tracer, "Visible", false)
+                end
+            end
+
+            if Config.ESPShowSkeleton and objs.skeleton then
+                for i, conn in ipairs(BONE_CONNECTIONS) do
+                    local partA = char:FindFirstChild(conn[1])
+                    local partB = char:FindFirstChild(conn[2])
+                    local line = objs.skeleton[i]
+                    if partA and partB and line then
+                        local posA, onA = Camera:WorldToViewportPoint(partA.Position)
+                        local posB, onB = Camera:WorldToViewportPoint(partB.Position)
+                        if onA and onB then
+                            setLine(line, Vector2.new(posA.X, posA.Y), Vector2.new(posB.X, posB.Y), Config.ESPColor, Config.ESPThickness)
+                            setProp(line, "Visible", true)
+                        else
+                            setProp(line, "Visible", false)
+                        end
+                    else
+                        setProp(line, "Visible", false)
+                    end
+                end
+            else
+                if objs.skeleton then
+                    for _, line in ipairs(objs.skeleton) do
+                        setProp(line, "Visible", false)
+                    end
+                end
+            end
+        else
+            HideAllObjects(objs)
+        end
+    end
+end
+
+for _, player in ipairs(Players:GetPlayers()) do
+    if player ~= LocalPlayer then
+        CreateESPForPlayer(player)
+    end
+end
+
+Players.PlayerAdded:Connect(function(player)
+    CreateESPForPlayer(player)
+end)
+
+Players.PlayerRemoving:Connect(function(player)
+    ClearESPForPlayer(player)
+end)
+
+-- ============================================================
+--  CONSTRUIRE LE MENU
+-- ============================================================
+
+CreateSection("🎯 AIMBOT")
+CreateToggle("Aimbot Actif", false, function(val)
+    Config.AimbotEnabled = val
+    UpdateFOVCircle()
+end)
+CreateSlider("FOV Aimbot", 10, 500, 120, function(val)
+    Config.AimbotFOV = val
+    UpdateFOVCircle()
+end)
+CreateSlider("Smoothness", 1, 100, 15, function(val)
+    Config.AimbotSmoothness = val / 100
+end)
+CreateToggle("Team Check", true, function(val)
+    Config.TeamCheck = val
+end)
+CreateToggle("Cercle FOV Visible", true, function(val)
+    AimbotFOVVisible = val
+    UpdateFOVCircle()
+end)
+
+CreateSection("👁️ ESP V2")
+CreateToggle("ESP V2 Actif", false, function(val)
+    Config.ESPEnabled = val
+end)
+CreateToggle("Afficher Noms V2", true, function(val)
+    Config.ESPShowName = val
+end)
+CreateToggle("Afficher Distance V2", true, function(val)
+    Config.ESPShowDistance = val
+end)
+CreateToggle("Afficher Barre de Vie V2", true, function(val)
+    Config.ESPShowHealth = val
+end)
+CreateToggle("Skeleton ESP V2", true, function(val)
+    Config.ESPShowSkeleton = val
+end)
+CreateToggle("ESP Line V2", true, function(val)
+    Config.ESPShowLine = val
+end)
+
+CreateSection("📷 CAMERA / FOV")
+CreateToggle("Changer le FOV", false, function(val)
+    Config.FOVEnabled = val
+    if not val then
+        Camera.FieldOfView = 70
+    end
+end)
+CreateSlider("Valeur FOV", 1, 150, 70, function(val)
+    Config.FOVValue = val
+end)
+
+CreateSection("🎮 MODES DE JEU")
+
+CreateToggle("3ème Personne V8", false, function(val)
+    setThirdPerson(val)
+end)
+
+CreateSlider("Distance Caméra", MIN_DISTANCE, MAX_DISTANCE, cameraDistance, function(val)
+    cameraDistance = val
+    if thirdPersonActive then
+        setZoom(cameraDistance)
+    end
+end)
+
+CreateToggle("Spin Bot", false, function(val)
+    setSpin(val)
+end)
+
+CreateSlider("Vitesse Spin", MIN_SPIN, MAX_SPIN, spinSpeed, function(val)
+    spinSpeed = val
+end)
+
+-- === NOUVELLE SECTION : MOUVEMENT (FLY / NOCLIP / INFJUMP) ===
+CreateSection("✈️ MOUVEMENT")
+
+CreateToggle("Fly (vol)", false, function(val)
+    setFly(val)
+end)
+
+CreateSlider("Vitesse Fly", MIN_FLY, MAX_FLY, flySpeed, function(val)
+    flySpeed = val
+end)
+
+CreateToggle("Noclip (traverser les murs)", false, function(val)
+    noclipActive = val
+end)
+
+CreateToggle("Infinite Jump", false, function(val)
+    infJumpActive = val
+end)
+
+-- Bouton fermer
+local CloseBtn = Instance.new("TextButton")
+CloseBtn.Size = UDim2.new(0, 30, 0, 30)
+CloseBtn.Position = UDim2.new(1, -35, 0, 7)
+CloseBtn.BackgroundColor3 = Color3.fromRGB(180, 20, 20)
+CloseBtn.BorderSizePixel = 0
+CloseBtn.Text = "X"
+CloseBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+CloseBtn.Font = Enum.Font.GothamBold
+CloseBtn.TextSize = 14
+CloseBtn.Parent = TitleBar
+
+local CloseCorner = Instance.new("UICorner")
+CloseCorner.CornerRadius = UDim.new(0, 6)
+CloseCorner.Parent = CloseBtn
+
+CloseBtn.MouseButton1Click:Connect(function()
+    Config.MenuOpen = false
+    MainFrame.Visible = false
+end)
+
+----------------------------------------------------
+-- LOGIQUE DE VALIDATION ET SAUVEGARDE DE LA KEY
+----------------------------------------------------
+local currentValidKey = nil
+
+local function loadCheatWithKey(keyStr)
+	local isValid, formattedTime = verifyKey(keyStr)
+	if isValid then
+		currentValidKey = keyStr
+		pcall(function()
+			if writefile then writefile(SAVE_FILE_NAME, keyStr) end
+		end)
+		keyFrame.Visible = false
+		MainFrame.Visible = true
+		Config.MenuOpen = true
+		return true
+	end
+	return false, formattedTime
+end
+
+validateKeyBtn.MouseButton1Click:Connect(function()
+	local inputKey = keyInputBox.Text
+	local ok, msg = loadCheatWithKey(inputKey)
+	if not ok then
+		keyStatusLabel.Text = msg or "Clé invalide !"
+		keyStatusLabel.TextColor3 = Color3.fromRGB(255, 80, 80)
+	end
+end)
+
+getDiscordBtn.MouseButton1Click:Connect(function()
+	copyToClipboard(DISCORD_LINK)
+	keyStatusLabel.Text = "Lien Discord copié ! (discord.gg/fkd9bs3kX)"
+	keyStatusLabel.TextColor3 = Color3.fromRGB(0, 255, 150)
+end)
+
+task.spawn(function()
+	local success, savedKey = pcall(function()
+		if readfile and isfile and isfile(SAVE_FILE_NAME) then
+			return readfile(SAVE_FILE_NAME)
+		end
+		return nil
+	end)
+
+	if success and savedKey and savedKey ~= "" then
+		keyInputBox.Text = savedKey
+	end
+	keyFrame.Visible = true
+end)
+
+task.spawn(function()
+	while true do
+		task.wait(1)
+		if currentValidKey then
+			local isValid, formattedTime = verifyKey(currentValidKey)
+			if isValid then
+				-- Clé toujours active
+			else
+				currentValidKey = nil
+				MainFrame.Visible = false
+				Config.MenuOpen = false
+				keyFrame.Visible = true
+				keyStatusLabel.Text = "Votre clé a expiré ou a été bloquée !"
+				keyStatusLabel.TextColor3 = Color3.fromRGB(255, 80, 80)
+			end
+		end
+	end
+end)
+
+-- ============================================================
+--  TOUCHE POUR OUVRIR / FERMER LE MENU (Ctrl Droit)
+-- ============================================================
+
+UserInputService.InputBegan:Connect(function(input, gameProcessed)
+    if input.KeyCode == Config.MenuToggleKey then
+        if currentValidKey then
+            Config.MenuOpen = not Config.MenuOpen
+            MainFrame.Visible = Config.MenuOpen
+        end
+    end
+    if input.KeyCode == Enum.KeyCode.F3 then
+        if adminPinFrame.Visible or adminGenFrame.Visible then
+            adminPinFrame.Visible = false
+            adminGenFrame.Visible = false
+        else
+            adminPinFrame.Visible = true
+        end
+    end
+end)
+
+-- ============================================================
+--  BOUCLE PRINCIPALE (RenderStepped pour ESP + Aimbot)
+-- ============================================================
+
+RunService.RenderStepped:Connect(function()
+    if Config.AimbotEnabled then
+        AimbotLoop()
+    end
+    UpdateESP()
+    UpdateFOVCircle()
+end)
+
+-- ============================================================
+--  FORCAGE FOV
+-- ============================================================
+
+RunService:BindToRenderStep("FKSniperFOV", Enum.RenderPriority.Camera.Value + 2, function()
+    if Config.FOVEnabled then
+        pcall(function()
+            Camera.FieldOfView = Config.FOVValue
+        end)
+    end
+end)
+
+Players.PlayerRemoving:Connect(function(player)
+    ClearESPForPlayer(player)
+end)
+
+print("FK-SNIPER UNDETECT charge avec succès ! Anti-cheat Arsenal neutralise.")
