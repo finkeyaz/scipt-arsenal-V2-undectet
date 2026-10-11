@@ -1,7 +1,7 @@
 -- ============================================================
 --  FK-SNIPER UNDETECT V2 (by elias) — Édition COMPLETE
 --  ESP V2 / Fly / Noclip / InfJump / Aimbot
---  + Rainbow Skin, Rainbow Camo, Skin Skeleton, Speed, Jump, Fullbright
+--  + Rainbow Skin, Rainbow Camo, Speed, Jump, Fullbright
 --  + Keybinds partout, Save/Load, Timer de clé, Infos FPS/Ping
 -- ============================================================
 
@@ -38,8 +38,8 @@ local Config = {
     MenuOpen = false,
     MenuToggleKey = Enum.KeyCode.RightControl,
     -- Nouveaux
-    KeyTimePos = "top-right",
-    KeyTimeOnScreen = true,
+    KeyTimePos = "top-right",       -- top-left / top-right / bottom-left / bottom-right
+    KeyTimeOnScreen = true,         -- afficher le timer clé à l'écran (HUD)
     InfoEnabled = true,
     RainbowSkin = false,
     RainbowCamo = false,
@@ -47,7 +47,6 @@ local Config = {
     RainbowSaturation = 1,
     RainbowBrightness = 1,
     RainbowRemoveClothes = true,
-    SkeletonSkin = false,
     SpeedEnabled = false,
     SpeedValue = 60,
     JumpEnabled = false,
@@ -83,13 +82,13 @@ local infJumpActive = false
 local ESPObjects = {}
 local AimbotFOVVisible = true
 
--- Valeurs d'origine du perso (anti-boost au load)
+-- Valeurs d'origine du perso (pour ne PAS booster quand tout est désactivé)
 local originalWalkSpeed = 16
 local originalJumpPower = 50
 local originalJumpHeight = 7.2
 local originalUseJumpPower = true
 
--- Registres
+-- Registres pour keybinds + save/load
 local CheatRegistry = {}
 local SliderRegistry = {}
 local Keybinds = {}
@@ -870,127 +869,7 @@ LocalPlayer.CharacterAdded:Connect(function(character)
 end)
 
 -- ============================================================
---  SKIN SKELETON (client-side, joueur local)
---  Meshes réels du bundle "Sentinel Skeleton"
--- ============================================================
-local SKELETON_BONE = Color3.fromRGB(236, 233, 222)
-
-local SKELETON_IDS = {
-	Head     = "rbxassetid://14498810426",
-	Torso    = "rbxassetid://14498813503",
-	LeftArm  = "rbxassetid://14498813466",
-	RightArm = "rbxassetid://14498813546",
-	LeftLeg  = "rbxassetid://14498813447",
-	RightLeg = "rbxassetid://14498813463",
-}
-
-local R15_SKELETON_MAP = {
-	Head = "Head",
-	UpperTorso = "Torso", LowerTorso = "Torso",
-	LeftUpperArm = "LeftArm", LeftLowerArm = "LeftArm", LeftHand = "LeftArm",
-	RightUpperArm = "RightArm", RightLowerArm = "RightArm", RightHand = "RightArm",
-	LeftUpperLeg = "LeftLeg", LeftLowerLeg = "LeftLeg", LeftFoot = "LeftLeg",
-	RightUpperLeg = "RightLeg", RightLowerLeg = "RightLeg", RightFoot = "RightLeg",
-}
-
-local R6_SKELETON_MAP = {
-	Head = "Head", Torso = "Torso",
-	["Left Arm"] = "LeftArm", ["Right Arm"] = "RightArm",
-	["Left Leg"] = "LeftLeg", ["Right Leg"] = "RightLeg",
-}
-
-local skeletonSaved = nil
-
-local function applySkeletonSkin(character)
-	character = character or LocalPlayer.Character
-	if not character then return end
-	local hum = character:FindFirstChildOfClass("Humanoid")
-	if not hum then return end
-	if skeletonSaved and skeletonSaved.char == character then return end
-
-	local saved = {char = character, parts = {}, clothes = {}, accessories = {}, bodyColors = nil}
-	skeletonSaved = saved
-
-	-- Retirer vêtements + cacher accessoires
-	for _, c in ipairs(character:GetChildren()) do
-		if c:IsA("Shirt") or c:IsA("Pants") or c:IsA("ShirtGraphic") then
-			table.insert(saved.clothes, {obj = c, parent = c.Parent}); c.Parent = nil
-		elseif c:IsA("Accessory") then
-			local h = c:FindFirstChild("Handle")
-			if h then table.insert(saved.accessories, {handle = h, tr = h.Transparency}); h.Transparency = 1 end
-		end
-	end
-	local bc = character:FindFirstChildOfClass("BodyColors")
-	if bc then saved.bodyColors = bc; bc.Parent = nil end
-
-	local map = (hum.RigType == Enum.HumanoidRigType.R15) and R15_SKELETON_MAP or R6_SKELETON_MAP
-	for partName, key in pairs(map) do
-		local part = character:FindFirstChild(partName)
-		if part and part:IsA("BasePart") then
-			local rec = {color = part.Color, material = part.Material}
-			if part:IsA("MeshPart") then
-				rec.mesh = part.MeshId; rec.texture = part.TextureID
-				part.MeshId = SKELETON_IDS[key]
-				part.TextureID = ""
-			else
-				local sm = part:FindFirstChildOfClass("SpecialMesh")
-				if not sm then sm = Instance.new("SpecialMesh"); sm.Parent = part; rec.createdMesh = true end
-				rec.mesh = sm.MeshId; rec.texture = sm.TextureId; rec.meshType = sm.MeshType
-				sm.MeshType = Enum.MeshType.FileMesh
-				sm.MeshId = SKELETON_IDS[key]
-				sm.TextureId = ""
-			end
-			part.Color = SKELETON_BONE
-			part.Material = Enum.Material.Sand
-			saved.parts[part] = rec
-		end
-	end
-end
-
-local function removeSkeletonSkin()
-	local saved = skeletonSaved
-	if not saved then return end
-	for part, rec in pairs(saved.parts) do
-		if part and part.Parent then
-			if part:IsA("MeshPart") then
-				part.MeshId = rec.mesh or part.MeshId
-				part.TextureID = rec.texture or ""
-			else
-				local sm = part:FindFirstChildOfClass("SpecialMesh")
-				if sm then
-					if rec.createdMesh then sm:Destroy() else
-						sm.MeshId = rec.mesh or sm.MeshId
-						sm.TextureId = rec.texture or ""
-						if rec.meshType then sm.MeshType = rec.meshType end
-					end
-				end
-			end
-			part.Color = rec.color
-			part.Material = rec.material
-		end
-	end
-	local character = saved.char
-	if character and character.Parent then
-		for _, entry in ipairs(saved.clothes) do
-			if entry.obj then entry.obj.Parent = character end
-		end
-		for _, entry in ipairs(saved.accessories) do
-			if entry.handle then entry.handle.Transparency = entry.tr end
-		end
-		if saved.bodyColors then saved.bodyColors.Parent = character end
-	end
-	skeletonSaved = nil
-end
-
--- Ré-application au respawn
-LocalPlayer.CharacterAdded:Connect(function(char)
-	char:WaitForChild("Humanoid", 5)
-	task.wait(0.3)
-	if Config.SkeletonSkin then skeletonSaved = nil; applySkeletonSkin(char) end
-end)
-
--- ============================================================
---  SPEED / JUMP / FULLBRIGHT (avec restauration des valeurs d'origine)
+--  SPEED / JUMP / FULLBRIGHT  (avec restauration des valeurs d'origine)
 -- ============================================================
 local function captureOriginals()
 	local character = LocalPlayer.Character
@@ -1007,7 +886,11 @@ local function applySpeed()
 	local character = LocalPlayer.Character
 	local hum = character and character:FindFirstChildOfClass("Humanoid")
 	if not hum then return end
-	if Config.SpeedEnabled then hum.WalkSpeed = Config.SpeedValue else hum.WalkSpeed = originalWalkSpeed end
+	if Config.SpeedEnabled then
+		hum.WalkSpeed = Config.SpeedValue
+	else
+		hum.WalkSpeed = originalWalkSpeed
+	end
 end
 
 local function applyJump()
@@ -1284,6 +1167,7 @@ local function applyInfoPos()
 end
 applyInfoPos()
 
+-- FPS / Ping
 local frameCount, fpsValue, pingValue = 0, 0, 0
 RunService.RenderStepped:Connect(function() frameCount += 1 end)
 task.spawn(function() while true do task.wait(1); fpsValue = frameCount; frameCount = 0 end end)
@@ -1335,12 +1219,6 @@ CreateSlider("Vitesse Fly", MIN_FLY, MAX_FLY, flySpeed, function(v) flySpeed = v
 CreateToggle("Noclip", false, function(v) noclipActive = v end, "noclip")
 CreateToggle("Infinite Jump", false, function(v) infJumpActive = v end, "infjump")
 
-CreateSection("💀 SKIN SKELETON")
-CreateToggle("Skin Skeleton (client)", false, function(v)
-	Config.SkeletonSkin = v
-	if v then applySkeletonSkin(LocalPlayer.Character) else removeSkeletonSkin() end
-end, "skeleton")
-
 CreateSection("🌈 SKIN / CHEATS BONUS")
 CreateToggle("Rainbow Skin", false, function(v) Config.RainbowSkin = v end, "rainbowskin")
 CreateToggle("Rainbow Camo (armes)", false, function(v) Config.RainbowCamo = v end, "rainbowcamo")
@@ -1354,6 +1232,7 @@ CreateToggle("Fullbright", false, function(v) Config.FullbrightEnabled = v; appl
 
 CreateSection("⚙️ PARAMETRES")
 
+-- Keybind du menu
 local menuKeyBtn = Instance.new("TextButton")
 menuKeyBtn.Size = UDim2.new(1, 0, 0, 34); menuKeyBtn.BackgroundColor3 = Color3.fromRGB(40, 40, 48)
 menuKeyBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
@@ -1365,6 +1244,7 @@ menuKeyBtn.MouseButton1Click:Connect(function()
 	ListeningFor = "MENU"; ListeningButton = menuKeyBtn; menuKeyBtn.Text = "Appuyez sur une touche..."
 end)
 
+-- Position du timer clé
 local posLabel = Instance.new("TextLabel")
 posLabel.Size = UDim2.new(1, 0, 0, 20); posLabel.BackgroundTransparency = 1
 posLabel.Text = "Position du timer de clé / infos"; posLabel.TextColor3 = Color3.fromRGB(255, 60, 60)
@@ -1403,6 +1283,7 @@ end
 CreateToggle("Afficher FPS / Ping", true, function(v) Config.InfoEnabled = v end, "info")
 CreateToggle("Timer clé à l'écran (HUD)", true, function(v) Config.KeyTimeOnScreen = v end, "keytime_onscreen")
 
+-- Save / Load
 local saveLoadFrame = Instance.new("Frame")
 saveLoadFrame.Size = UDim2.new(1, 0, 0, 34); saveLoadFrame.BackgroundTransparency = 1
 saveLoadFrame.LayoutOrder = nextOrder(); saveLoadFrame.Parent = ScrollingFrame
@@ -1421,12 +1302,14 @@ loadBtn.TextColor3 = Color3.fromRGB(255, 255, 255); loadBtn.Text = "📂 LOAD"
 loadBtn.Font = Enum.Font.GothamBold; loadBtn.TextSize = 14; loadBtn.Parent = saveLoadFrame
 Instance.new("UICorner", loadBtn).CornerRadius = UDim.new(0, 6)
 
+-- Keybinds par cheat
 local kbLabel = Instance.new("TextLabel")
 kbLabel.Size = UDim2.new(1, 0, 0, 20); kbLabel.BackgroundTransparency = 1
 kbLabel.Text = "Keybinds (clique puis appuie sur une touche)"; kbLabel.TextColor3 = Color3.fromRGB(255, 60, 60)
 kbLabel.Font = Enum.Font.GothamBold; kbLabel.TextSize = 13
 kbLabel.TextXAlignment = Enum.TextXAlignment.Left; kbLabel.LayoutOrder = nextOrder(); kbLabel.Parent = ScrollingFrame
 
+-- Keybinds par défaut
 Keybinds["aimbot"] = Enum.KeyCode.E
 Keybinds["keytime_onscreen"] = Enum.KeyCode.RightControl
 
@@ -1459,6 +1342,7 @@ end
 
 for id in pairs(CheatRegistry) do CreateKeybindRow(id) end
 
+-- Bouton fermer
 local CloseBtn = Instance.new("TextButton")
 CloseBtn.Size = UDim2.new(0, 30, 0, 30); CloseBtn.Position = UDim2.new(1, -35, 0, 7)
 CloseBtn.BackgroundColor3 = Color3.fromRGB(180, 20, 20); CloseBtn.BorderSizePixel = 0
@@ -1467,6 +1351,7 @@ CloseBtn.Font = Enum.Font.GothamBold; CloseBtn.TextSize = 14; CloseBtn.Parent = 
 Instance.new("UICorner", CloseBtn).CornerRadius = UDim.new(0, 6)
 CloseBtn.MouseButton1Click:Connect(function() Config.MenuOpen = false; MainFrame.Visible = false end)
 
+-- Timer de clé OBLIGATOIRE sur le panel (collé à gauche du X)
 local PanelKeyTimeBg = Instance.new("Frame")
 PanelKeyTimeBg.Size = UDim2.new(0, 170, 0, 28)
 PanelKeyTimeBg.Position = UDim2.new(1, -210, 0, 8)
@@ -1543,6 +1428,9 @@ loadBtn.MouseButton1Click:Connect(function()
 	local data = func()
 	if type(data) ~= "table" then return end
 
+	-- IMPORTANT : on applique d'abord les TOGGLES (états on/off),
+	-- puis les sliders. Comme applySpeed/applyJump restaurent l'origine
+	-- quand c'est désactivé, aucun "boost" parasite n'apparaît.
 	if data.cheats then
 		for id, v in pairs(data.cheats) do
 			if CheatRegistry[id] then CheatRegistry[id]:set(v) end
@@ -1575,6 +1463,7 @@ loadBtn.MouseButton1Click:Connect(function()
 		if data.misc.espColor then Config.ESPColor = data.misc.espColor end
 	end
 
+	-- Sécurité anti-boost : on ré-applique proprement après le load
 	applySpeed(); applyJump()
 
 	loadBtn.Text = "✔ Chargé"
@@ -1643,9 +1532,10 @@ task.spawn(function()
 end)
 
 -- ============================================================
---  INPUTS
+--  INPUTS (menu / admin / keybinds / listening)
 -- ============================================================
 UserInputService.InputBegan:Connect(function(input, gameProcessed)
+	-- Mode écoute keybind
 	if ListeningFor and input.UserInputType == Enum.UserInputType.Keyboard then
 		if ListeningFor == "MENU" then
 			Config.MenuToggleKey = input.KeyCode
@@ -1673,6 +1563,7 @@ UserInputService.InputBegan:Connect(function(input, gameProcessed)
 			adminPinFrame.Visible = true
 		end
 	end
+	-- Keybinds des cheats
 	for id, key in pairs(Keybinds) do
 		if key and input.KeyCode == key then
 			local c = CheatRegistry[id]
@@ -1694,4 +1585,4 @@ RunService:BindToRenderStep("FKSniperFOV", Enum.RenderPriority.Camera.Value + 2,
 	if Config.FOVEnabled then pcall(function() Camera.FieldOfView = Config.FOVValue end) end
 end)
 
-print("FK-SNIPER UNDETECT V2 chargé — Skin Skeleton prêt (client-side).")
+print("FK-SNIPER UNDETECT V2 chargé avec succès ! Anti-cheat Arsenal neutralisé.")
