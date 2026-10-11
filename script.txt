@@ -39,6 +39,7 @@ local Config = {
     MenuToggleKey = Enum.KeyCode.RightControl,
     -- Nouveaux
     KeyTimePos = "top-right",       -- top-left / top-right / bottom-left / bottom-right
+    KeyTimeOnScreen = true,         -- afficher le timer clé à l'écran (HUD)
     InfoEnabled = true,
     RainbowSkin = false,
     RainbowCamo = false,
@@ -1124,6 +1125,7 @@ task.spawn(function()
 	while true do
 		task.wait(0.5)
 		InfoLabel.Visible = Config.InfoEnabled
+		KeyTimeLabel.Visible = Config.KeyTimeOnScreen
 		if Config.InfoEnabled then InfoLabel.Text = string.format("FPS: %d | Ping: %d ms", fpsValue, pingValue) end
 	end
 end)
@@ -1228,6 +1230,7 @@ for n, btn in pairs(posButtons) do
 end
 
 CreateToggle("Afficher FPS / Ping", true, function(v) Config.InfoEnabled = v end, "info")
+CreateToggle("Timer clé à l'écran (HUD)", true, function(v) Config.KeyTimeOnScreen = v end, "keytime_onscreen")
 
 -- Save / Load
 local saveLoadFrame = Instance.new("Frame")
@@ -1257,6 +1260,7 @@ kbLabel.TextXAlignment = Enum.TextXAlignment.Left; kbLabel.LayoutOrder = nextOrd
 
 -- Keybinds par défaut
 Keybinds["aimbot"] = Enum.KeyCode.E
+Keybinds["keytime_onscreen"] = Enum.KeyCode.RightControl
 
 local function CreateKeybindRow(id)
 	local entry = CheatRegistry[id]
@@ -1296,6 +1300,18 @@ CloseBtn.Font = Enum.Font.GothamBold; CloseBtn.TextSize = 14; CloseBtn.Parent = 
 Instance.new("UICorner", CloseBtn).CornerRadius = UDim.new(0, 6)
 CloseBtn.MouseButton1Click:Connect(function() Config.MenuOpen = false; MainFrame.Visible = false end)
 
+-- Timer de clé OBLIGATOIRE sur le panel (à gauche du X)
+local PanelKeyTimeLabel = Instance.new("TextLabel")
+PanelKeyTimeLabel.Size = UDim2.new(0, 205, 0, 30)
+PanelKeyTimeLabel.Position = UDim2.new(1, -250, 0, 7)
+PanelKeyTimeLabel.BackgroundTransparency = 1
+PanelKeyTimeLabel.Text = "Clé: --"
+PanelKeyTimeLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+PanelKeyTimeLabel.Font = Enum.Font.GothamBold
+PanelKeyTimeLabel.TextSize = 13
+PanelKeyTimeLabel.TextXAlignment = Enum.TextXAlignment.Right
+PanelKeyTimeLabel.Parent = TitleBar
+
 -- ============================================================
 --  SAVE / LOAD (manuel)
 -- ============================================================
@@ -1328,6 +1344,7 @@ saveBtn.MouseButton1Click:Connect(function()
 	data.misc.menuKey = Config.MenuToggleKey
 	data.misc.keyTimePos = Config.KeyTimePos
 	data.misc.info = Config.InfoEnabled
+	data.misc.keyTimeOnScreen = Config.KeyTimeOnScreen
 	data.misc.espColor = Config.ESPColor
 
 	local str = encodeValue(data)
@@ -1378,6 +1395,7 @@ loadBtn.MouseButton1Click:Connect(function()
 			end
 		end
 		if data.misc.info ~= nil and CheatRegistry["info"] then CheatRegistry["info"]:set(data.misc.info) end
+		if data.misc.keyTimeOnScreen ~= nil and CheatRegistry["keytime_onscreen"] then CheatRegistry["keytime_onscreen"]:set(data.misc.keyTimeOnScreen) end
 		if data.misc.espColor then Config.ESPColor = data.misc.espColor end
 	end
 	loadBtn.Text = "✔ Chargé"
@@ -1430,13 +1448,17 @@ task.spawn(function()
 			local isValid, formattedTime = verifyKey(currentValidKey)
 			if isValid then
 				KeyTimeLabel.Text = "Clé: " .. formattedTime
+				PanelKeyTimeLabel.Text = "⏱ " .. formattedTime
 			else
 				currentValidKey = nil
 				MainFrame.Visible = false; Config.MenuOpen = false
 				keyFrame.Visible = true
+				PanelKeyTimeLabel.Text = "Clé: --"
 				keyStatusLabel.Text = "Votre clé a expiré ou a été bloquée !"
 				keyStatusLabel.TextColor3 = Color3.fromRGB(255, 80, 80)
 			end
+		else
+			PanelKeyTimeLabel.Text = "Clé: --"
 		end
 	end
 end)
