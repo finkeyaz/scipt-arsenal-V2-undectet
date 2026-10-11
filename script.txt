@@ -82,6 +82,12 @@ local infJumpActive = false
 local ESPObjects = {}
 local AimbotFOVVisible = true
 
+-- Valeurs d'origine du perso (pour ne PAS booster quand tout est désactivé)
+local originalWalkSpeed = 16
+local originalJumpPower = 50
+local originalJumpHeight = 7.2
+local originalUseJumpPower = true
+
 -- Registres pour keybinds + save/load
 local CheatRegistry = {}
 local SliderRegistry = {}
@@ -501,10 +507,10 @@ TitleFix.Size = UDim2.new(1, 0, 0, 10); TitleFix.Position = UDim2.new(0, 0, 1, -
 TitleFix.BackgroundColor3 = Color3.fromRGB(255, 20, 20); TitleFix.BorderSizePixel = 0; TitleFix.Parent = TitleBar
 
 local TitleLabel = Instance.new("TextLabel")
-TitleLabel.Size = UDim2.new(1, -60, 1, 0); TitleLabel.Position = UDim2.new(0, 10, 0, 0)
+TitleLabel.Size = UDim2.new(1, -225, 1, 0); TitleLabel.Position = UDim2.new(0, 10, 0, 0)
 TitleLabel.BackgroundTransparency = 1; TitleLabel.Text = "FK-SNIPER UNDETECT V2"
 TitleLabel.TextColor3 = Color3.fromRGB(255, 255, 255); TitleLabel.Font = Enum.Font.GothamBold
-TitleLabel.TextSize = 18; TitleLabel.TextXAlignment = Enum.TextXAlignment.Left; TitleLabel.Parent = TitleBar
+TitleLabel.TextSize = 16; TitleLabel.TextXAlignment = Enum.TextXAlignment.Left; TitleLabel.Parent = TitleBar
 
 local ScrollingFrame = Instance.new("ScrollingFrame")
 ScrollingFrame.Size = UDim2.new(1, -20, 1, -55); ScrollingFrame.Position = UDim2.new(0, 10, 0, 50)
@@ -863,21 +869,44 @@ LocalPlayer.CharacterAdded:Connect(function(character)
 end)
 
 -- ============================================================
---  SPEED / JUMP / FULLBRIGHT
+--  SPEED / JUMP / FULLBRIGHT  (avec restauration des valeurs d'origine)
 -- ============================================================
-local function applySpeed()
-	local character = LocalPlayer.Character
-	local hum = character and character:FindFirstChildOfClass("Humanoid")
-	if hum then hum.WalkSpeed = Config.SpeedEnabled and Config.SpeedValue or 16 end
-end
-local function applyJump()
+local function captureOriginals()
 	local character = LocalPlayer.Character
 	local hum = character and character:FindFirstChildOfClass("Humanoid")
 	if hum then
-		hum.UseJumpPower = true
-		hum.JumpPower = Config.JumpEnabled and Config.JumpValue or 50
+		originalWalkSpeed = hum.WalkSpeed
+		originalJumpPower = hum.JumpPower
+		originalJumpHeight = hum.JumpHeight
+		originalUseJumpPower = hum.UseJumpPower
 	end
 end
+
+local function applySpeed()
+	local character = LocalPlayer.Character
+	local hum = character and character:FindFirstChildOfClass("Humanoid")
+	if not hum then return end
+	if Config.SpeedEnabled then
+		hum.WalkSpeed = Config.SpeedValue
+	else
+		hum.WalkSpeed = originalWalkSpeed
+	end
+end
+
+local function applyJump()
+	local character = LocalPlayer.Character
+	local hum = character and character:FindFirstChildOfClass("Humanoid")
+	if not hum then return end
+	if Config.JumpEnabled then
+		hum.UseJumpPower = true
+		hum.JumpPower = Config.JumpValue
+	else
+		hum.UseJumpPower = originalUseJumpPower
+		hum.JumpPower = originalJumpPower
+		hum.JumpHeight = originalJumpHeight
+	end
+end
+
 local function applyFullbright()
 	if Config.FullbrightEnabled then
 		if not savedLighting then
@@ -893,7 +922,29 @@ local function applyFullbright()
 		savedLighting = nil
 	end
 end
-LocalPlayer.CharacterAdded:Connect(function() task.wait(0.5); applySpeed(); applyJump() end)
+
+LocalPlayer.CharacterAdded:Connect(function(char)
+	local hum = char:WaitForChild("Humanoid", 5)
+	if hum then
+		originalWalkSpeed = hum.WalkSpeed
+		originalJumpPower = hum.JumpPower
+		originalJumpHeight = hum.JumpHeight
+		originalUseJumpPower = hum.UseJumpPower
+	end
+	task.wait(0.2)
+	applySpeed(); applyJump()
+end)
+
+task.spawn(function()
+	local char = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
+	local hum = char:WaitForChild("Humanoid", 5)
+	if hum then
+		originalWalkSpeed = hum.WalkSpeed
+		originalJumpPower = hum.JumpPower
+		originalJumpHeight = hum.JumpHeight
+		originalUseJumpPower = hum.UseJumpPower
+	end
+end)
 
 -- ============================================================
 --  AIMBOT / ESP
@@ -1300,17 +1351,27 @@ CloseBtn.Font = Enum.Font.GothamBold; CloseBtn.TextSize = 14; CloseBtn.Parent = 
 Instance.new("UICorner", CloseBtn).CornerRadius = UDim.new(0, 6)
 CloseBtn.MouseButton1Click:Connect(function() Config.MenuOpen = false; MainFrame.Visible = false end)
 
--- Timer de clé OBLIGATOIRE sur le panel (à gauche du X)
+-- Timer de clé OBLIGATOIRE sur le panel (collé à gauche du X)
+local PanelKeyTimeBg = Instance.new("Frame")
+PanelKeyTimeBg.Size = UDim2.new(0, 170, 0, 28)
+PanelKeyTimeBg.Position = UDim2.new(1, -210, 0, 8)
+PanelKeyTimeBg.BackgroundColor3 = Color3.fromRGB(130, 0, 0)
+PanelKeyTimeBg.BorderSizePixel = 0
+PanelKeyTimeBg.ZIndex = 5
+PanelKeyTimeBg.Parent = TitleBar
+Instance.new("UICorner", PanelKeyTimeBg).CornerRadius = UDim.new(0, 6)
+
 local PanelKeyTimeLabel = Instance.new("TextLabel")
-PanelKeyTimeLabel.Size = UDim2.new(0, 205, 0, 30)
-PanelKeyTimeLabel.Position = UDim2.new(1, -250, 0, 7)
+PanelKeyTimeLabel.Size = UDim2.new(1, -10, 1, 0)
+PanelKeyTimeLabel.Position = UDim2.new(0, 5, 0, 0)
 PanelKeyTimeLabel.BackgroundTransparency = 1
 PanelKeyTimeLabel.Text = "Clé: --"
 PanelKeyTimeLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
 PanelKeyTimeLabel.Font = Enum.Font.GothamBold
 PanelKeyTimeLabel.TextSize = 13
-PanelKeyTimeLabel.TextXAlignment = Enum.TextXAlignment.Right
-PanelKeyTimeLabel.Parent = TitleBar
+PanelKeyTimeLabel.TextXAlignment = Enum.TextXAlignment.Center
+PanelKeyTimeLabel.ZIndex = 6
+PanelKeyTimeLabel.Parent = PanelKeyTimeBg
 
 -- ============================================================
 --  SAVE / LOAD (manuel)
@@ -1367,6 +1428,9 @@ loadBtn.MouseButton1Click:Connect(function()
 	local data = func()
 	if type(data) ~= "table" then return end
 
+	-- IMPORTANT : on applique d'abord les TOGGLES (états on/off),
+	-- puis les sliders. Comme applySpeed/applyJump restaurent l'origine
+	-- quand c'est désactivé, aucun "boost" parasite n'apparaît.
 	if data.cheats then
 		for id, v in pairs(data.cheats) do
 			if CheatRegistry[id] then CheatRegistry[id]:set(v) end
@@ -1398,6 +1462,10 @@ loadBtn.MouseButton1Click:Connect(function()
 		if data.misc.keyTimeOnScreen ~= nil and CheatRegistry["keytime_onscreen"] then CheatRegistry["keytime_onscreen"]:set(data.misc.keyTimeOnScreen) end
 		if data.misc.espColor then Config.ESPColor = data.misc.espColor end
 	end
+
+	-- Sécurité anti-boost : on ré-applique proprement après le load
+	applySpeed(); applyJump()
+
 	loadBtn.Text = "✔ Chargé"
 	task.delay(1.2, function() loadBtn.Text = "📂 LOAD" end)
 end)
@@ -1448,7 +1516,7 @@ task.spawn(function()
 			local isValid, formattedTime = verifyKey(currentValidKey)
 			if isValid then
 				KeyTimeLabel.Text = "Clé: " .. formattedTime
-				PanelKeyTimeLabel.Text = "⏱ " .. formattedTime
+				PanelKeyTimeLabel.Text = "Clé: " .. formattedTime
 			else
 				currentValidKey = nil
 				MainFrame.Visible = false; Config.MenuOpen = false
